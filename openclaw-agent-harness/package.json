@@ -1,0 +1,44 @@
+{
+  "name": "@arcane/openclaw-agent-harness",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json -w",
+    "lint": "eslint .",
+    "format": "prettier -w .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "summarize:audit": "node scripts/summarize-audit.js",
+    "sandbox:apply": "node scripts/sandbox-apply-proposal.js",
+    "sandbox:promote": "node scripts/promote-sandbox-patches.js",
+    "test:fixtures": "node dist/serde/attemptPayload.test.js --run",
+    "test:policy:fixtures": "node dist/policy/loadPolicy.test.js --run",
+    "test:policy:known-type": "node dist/policy/knownTypeGate.test.js --run",
+    "run:echo-cli": "node dist/native/echo-cli.js",
+    "bun:install": "bun install",
+    "bun:typecheck": "bun x tsc -p tsconfig.json --noEmit",
+    "bun:build": "bun x tsc -p tsconfig.json",
+    "bun:dev": "bun x tsc -p tsconfig.json -w",
+    "bun:run:echo-cli": "bun dist/native/echo-cli.js",
+    "bun:run:persistent-daemon": "bun dist/native/persistent-daemon.js",
+    "ps:protocol:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/protocol-generate.ps1",
+    "ps:protocol:validate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/protocol-validate.ps1"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.6.0"
+  }
+}
+

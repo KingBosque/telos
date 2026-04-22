@@ -1,0 +1,16 @@
+{
+  "v": 0,
+  "ts": 0,
+  "kind": "protocol_unknown",
+  "scope": "fixture",
+  "reason": "unknown_event_type",
+  "unknownType": "foo",
+  "summary": { "note": "fixture proposal to allow foo as extension" },
+  "patch": {
+    "v": 0,
+    "protocol": {
+      "addKnownEventTypes": ["foo"]
+    }
+  }
+}
+

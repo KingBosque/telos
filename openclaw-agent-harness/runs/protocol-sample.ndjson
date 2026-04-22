@@ -1,0 +1,9 @@
+﻿{"status":"ok","type":"heartbeat","v":0,"ts":"1776864221707"}
+{"event":{"kind":"trace","message":"protocol-generate: demo stream"},"type":"agent_event","v":0}
+{"event":{"trigger":{"source":"event","untrustedContext":{"foo":"bar"},"id":"trigger-demo-1","intent":"demo intent"},"triggerId":"trigger-demo-1","kind":"trigger"},"type":"agent_event","v":0}
+{"dataProvenance":"user_intent","arguments":{"prompt":"hello"},"callId":"call-1776864221707","type":"tool_call","name":"echo_tool","reason":"demo: validate safety fields","expectedSideEffects":["reads prompt","returns summary"],"v":0}
+{"type":"partial_reply","v":0,"text":"Demo reply for a"}
+{"type":"partial_reply","v":0,"text":"ttempt-177686422"}
+{"type":"partial_reply","v":0,"text":"1702.\n"}
+{"result":{"status":"ok","native":{"binding":{"nativeThreadId":"thread-demo","openclawSessionId":"session-demo"},"threadId":"thread-demo"},"text":"Demo reply for attempt-1776864221702.\n"},"type":"final","v":0}
+{"type":"budget","v":0,"remaining":{"turnsPerHour":30,"toolCallsThisTurn":19,"wallClockMsThisTurn":600000}}

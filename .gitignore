@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output (openclaw-agent-harness)
+openclaw-agent-harness/dist/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Logs & caches
+*.log
+npm-debug.log*
+.pnpm-debug.log*
+.npm
+.cache
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# TypeScript
+*.tsbuildinfo

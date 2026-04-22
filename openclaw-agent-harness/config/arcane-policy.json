@@ -1,0 +1,21 @@
+{
+  "v": 0,
+  "protocol": {
+    "strictness": "permissive",
+    "knownEventTypes": [
+      "agent_event",
+      "budget",
+      "final",
+      "handshake",
+      "heartbeat",
+      "partial_reply",
+      "tool_call",
+      "tool_result"
+    ]
+  },
+  "sandbox": {
+    "ttlMsDefault": 900000,
+    "maxActiveSandboxPatches": 8
+  }
+}
+
