@@ -1,4 +1,4 @@
-import type { AgentHarness } from "openclaw/plugin-sdk/agent-harness";
+import type { AgentHarness, AgentHarnessAttemptParams } from "openclaw/plugin-sdk/agent-harness";
 import type { HarnessAttemptPayload } from "./serde/attemptPayload.js";
 import { createSpawnedDaemonClient } from "./daemon/client.js";
 import { InMemoryBindingStore } from "./daemon/inMemoryBindings.js";
@@ -11,6 +11,29 @@ import { loadPolicy } from "./policy/loadPolicy.js";
 import { createTurnsPerHourLimiter } from "./safety/turnBudget.js";
 
 export const ARCANE_HARNESS_ID = "arcane-native";
+
+/** OpenClaw uses `clientTools` on the attempt params; this starter also accepts legacy `tools` for the daemon payload. */
+function resolveToolListForPayload(params: AgentHarnessAttemptParams): HarnessAttemptPayload["tools"] {
+  const p = params as AgentHarnessAttemptParams & {
+    tools?: HarnessAttemptPayload["tools"];
+  };
+  if (Array.isArray(p.tools) && p.tools.length > 0) {
+    return p.tools.map((t) => ({
+      name: String(t.name),
+      description: safeString(t.description),
+      schema: (t as { schema?: unknown }).schema,
+    }));
+  }
+  const clientTools = p.clientTools;
+  if (Array.isArray(clientTools) && clientTools.length > 0) {
+    return clientTools.map((t) => ({
+      name: String((t as { name: unknown }).name),
+      description: safeString((t as { description?: unknown }).description),
+      schema: (t as { schema?: unknown; parameters?: unknown }).schema ?? (t as { parameters?: unknown }).parameters,
+    }));
+  }
+  return [];
+}
 
 function safeString(x: unknown): string | undefined {
   return typeof x === "string" ? x : undefined;
@@ -59,7 +82,7 @@ export function createArcaneHarness(): AgentHarness {
       return { supported: false };
     },
 
-    async runAttempt(params) {
+    async runAttempt(params: AgentHarnessAttemptParams) {
       let streamed = "";
       const attemptStartTs = Date.now();
       let toolCallsThisTurn = 0;
@@ -148,12 +171,8 @@ export function createArcaneHarness(): AgentHarness {
         trigger: { source: triggerSource as any, id: triggerId },
         model: safeString((params as unknown as { model?: unknown }).model),
         provider: safeString((params as unknown as { provider?: unknown }).provider),
-        tools: (params.tools ?? []).map((t: any) => ({
-          name: String(t.name),
-          description: safeString(t.description),
-          schema: (t as any).schema,
-        })),
-        images: params.images ?? [],
+        tools: resolveToolListForPayload(params),
+        images: (params as { images?: HarnessAttemptPayload["images"] }).images ?? [],
         session: {
           openclawSessionId: safeString((params as any).sessionId),
           transcriptPath: safeString((params as any).transcriptPath),
@@ -229,7 +248,7 @@ export function createArcaneHarness(): AgentHarness {
             tool: {
               name: toolCall.name,
               callId: toolCall.callId,
-              approved: exec.approved ?? "unknown",
+              approved: typeof exec.approved === "boolean" ? exec.approved : "unknown",
               policyBasis: { reason: policyBasis.reason, detailsDigest: audit.digestJson(policyBasis.details ?? {}) },
               reason: safeString((toolCall as any).reason),
               expectedSideEffects: Array.isArray((toolCall as any).expectedSideEffects)
@@ -279,7 +298,7 @@ export function createArcaneHarness(): AgentHarness {
                 } else {
                   streamedChars = nextChars;
                   streamed += evt.text;
-                  params.onPartialReply?.(evt.text);
+                  void params.onPartialReply?.({ text: evt.text });
                 }
               }
               break;
@@ -292,15 +311,22 @@ export function createArcaneHarness(): AgentHarness {
             case "heartbeat":
               params.onAgentEvent?.({ kind: "heartbeat", ts: evt.ts, status: evt.status } as any);
               break;
+            case "budget":
+              params.onAgentEvent?.({
+                kind: "budget_remaining",
+                remaining: {
+                  turnsPerHour: evt.remaining.turnsPerHour,
+                  toolCallsThisTurn: evt.remaining.toolCallsThisTurn,
+                  wallClockMsThisTurn: evt.remaining.wallClockMsThisTurn,
+                },
+                mode: modeState.mode,
+              } as any);
+              break;
             case "tool_call":
             case "tool_result":
             case "final":
               // tool_call/tool_result are handled by the daemon client; final is handled after await
               break;
-            default: {
-              const _exhaustive: never = evt;
-              return _exhaustive;
-            }
           }
         },
       });

@@ -161,7 +161,11 @@ async function main() {
 
         for (const t of triggers) {
           triggerState.openLoops += 1;
-          writeEvent({ v: 0, type: "agent_event", event: { kind: "trigger", triggerId: t.id, trigger: t } });
+          writeEvent({
+          v: 0,
+          type: "agent_event",
+          event: { ...t, kind: "trigger" as const, triggerId: t.id },
+        });
           audit.append({
             openclawSessionId: "trigger-daemon",
             attemptId: `trigger-${t.id}`,
@@ -205,7 +209,7 @@ async function main() {
       inboxDir,
       onEvent: (evt) => {
         // Emit as agent events; in a real integration, these become OpenClaw attempts via core.
-        writeEvent({ v: 0, type: "agent_event", event: { kind: "trigger", triggerId: evt.triggerId, ...evt } });
+        writeEvent({ v: 0, type: "agent_event", event: { ...evt, kind: "trigger" as const, triggerId: evt.triggerId } });
       },
       capabilityProfile: capabilityProfileForMode(modeState.mode),
       mode: modeState.mode,
@@ -235,7 +239,7 @@ async function main() {
     });
     for (const t of triggers) {
       triggerState.openLoops += 1;
-      writeEvent({ v: 0, type: "agent_event", event: { kind: "trigger", triggerId: t.id, trigger: t } });
+      writeEvent({ v: 0, type: "agent_event", event: { ...t, kind: "trigger" as const, triggerId: t.id } });
       writeEvent({
         v: 0,
         type: "agent_event",
@@ -304,10 +308,13 @@ async function main() {
       }
     }
 
-    if (msg.type === "tool_result" && pendingToolResult && msg.callId === pendingToolResult.callId) {
-      const p = pendingToolResult;
-      pendingToolResult = null;
-      p.resolve(msg.result);
+    if (msg.type === "tool_result") {
+      const tr: ToolResult = msg;
+      if (pendingToolResult && tr.callId === pendingToolResult.callId) {
+        const p = pendingToolResult;
+        pendingToolResult = null;
+        p.resolve(tr.result);
+      }
       continue;
     }
 

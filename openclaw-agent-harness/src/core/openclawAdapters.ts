@@ -26,7 +26,7 @@ export function executeToolViaOpenClawCore(args: {
     return withTimeout(
       exec1({ name: toolCall.name, arguments: toolCall.arguments }).then((result) => ({
         ok: true,
-        approved: "unknown",
+        approved: undefined,
         result,
       })),
       timeoutMs,
@@ -38,11 +38,15 @@ export function executeToolViaOpenClawCore(args: {
     p?.executeToolByName as undefined | ((name: string, args: unknown) => Promise<{ approved?: boolean; result?: unknown } | unknown>);
   if (exec2) {
     return withTimeout(
-      exec2(toolCall.name, toolCall.arguments).then((out) => ({
-        ok: true,
-        approved: (out as any)?.approved ?? "unknown",
-        result: (out as any)?.result ?? out,
-      })),
+      exec2(toolCall.name, toolCall.arguments).then((out) => {
+        const o = out as { approved?: boolean; result?: unknown } | undefined;
+        const approved = typeof o?.approved === "boolean" ? o.approved : undefined;
+        return {
+          ok: true,
+          approved,
+          result: o && typeof o === "object" && "result" in o ? (o as { result?: unknown }).result : out,
+        };
+      }),
       timeoutMs,
     );
   }
@@ -51,7 +55,7 @@ export function executeToolViaOpenClawCore(args: {
   const runTool = p?.runTool as undefined | ((name: string, args: unknown) => Promise<unknown>);
   if (runTool) {
     return withTimeout(
-      runTool(toolCall.name, toolCall.arguments).then((result) => ({ ok: true, approved: "unknown", result })),
+      runTool(toolCall.name, toolCall.arguments).then((result) => ({ ok: true, approved: undefined, result })),
       timeoutMs,
     );
   }

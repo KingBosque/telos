@@ -14,10 +14,16 @@ Workspace for the **Arcane OpenClaw agent harness** and related Cursor **skills*
 ```bash
 cd openclaw-agent-harness
 npm install
+npm run typecheck
 npm run build
 ```
 
-The harness expects an OpenClaw host with `openclaw` as a peer dependency. Runtime selection and env vars are documented in [`openclaw-agent-harness/README.md`](openclaw-agent-harness/README.md).
+The harness lists `openclaw` as a peer at runtime; the package also depends on
+`openclaw` in dev for local `tsc`. Use the same major/calendar line as your
+OpenClaw app. **Install the built plugin with** `openclaw plugins install` on
+the packed `.tgz` (not `npm install` into the OpenClaw tree). See
+[`openclaw-agent-harness/README.md`](openclaw-agent-harness/README.md) for build,
+pack, and security-scanner notes.
 
 ## License
 
