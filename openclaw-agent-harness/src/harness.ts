@@ -1,5 +1,11 @@
-import type { AgentHarness, AgentHarnessAttemptParams } from "openclaw/plugin-sdk/agent-harness";
-import type { HarnessAttemptPayload } from "./serde/attemptPayload.js";
+import type {
+  AgentHarness,
+  AgentHarnessAttemptParams,
+  AgentHarnessAttemptResult,
+  AgentHarnessResetParams,
+} from "openclaw/plugin-sdk/agent-harness";
+import type { HarnessAttemptPayload, TriggerSource } from "./serde/attemptPayload.js";
+import { asArcaneAttemptParams, type ArcaneHarnessAttemptParams } from "./openclaw-params.js";
 import { createSpawnedDaemonClient } from "./daemon/client.js";
 import { InMemoryBindingStore } from "./daemon/inMemoryBindings.js";
 import { FileBindingStore } from "./daemon/fileBindingStore.js";
@@ -13,8 +19,8 @@ import { createTurnsPerHourLimiter } from "./safety/turnBudget.js";
 export const ARCANE_HARNESS_ID = "arcane-native";
 
 /** OpenClaw uses `clientTools` on the attempt params; this starter also accepts legacy `tools` for the daemon payload. */
-function resolveToolListForPayload(params: AgentHarnessAttemptParams): HarnessAttemptPayload["tools"] {
-  const p = params as AgentHarnessAttemptParams & {
+function resolveToolListForPayload(params: AgentHarnessAttemptParams | ArcaneHarnessAttemptParams): HarnessAttemptPayload["tools"] {
+  const p = params as ArcaneHarnessAttemptParams & {
     tools?: HarnessAttemptPayload["tools"];
   };
   if (Array.isArray(p.tools) && p.tools.length > 0) {
@@ -51,7 +57,8 @@ function toolNameAllowed(args: { profile: CapabilityProfile; toolName: string })
   return matches(allow);
 }
 
-export function createArcaneHarness(): AgentHarness {
+export function createArcaneHarness(_options?: { pluginConfig?: unknown }): AgentHarness {
+  void _options;
   const bindings = process.env.ARCANE_BINDINGS_PERSIST === "1" ? new FileBindingStore() : new InMemoryBindingStore();
   const audit = createAuditLedger();
   const turnsPerHour = createTurnsPerHourLimiter({ maxTurnsPerHour: defaultModeConfig().profiles.active.budgets.maxTurnsPerHour });
@@ -85,7 +92,8 @@ export function createArcaneHarness(): AgentHarness {
       return { supported: false };
     },
 
-    async runAttempt(params: AgentHarnessAttemptParams) {
+    async runAttempt(params: AgentHarnessAttemptParams): Promise<AgentHarnessAttemptResult> {
+      const p = asArcaneAttemptParams(params);
       let streamed = "";
       const attemptStartTs = Date.now();
       let toolCallsThisTurn = 0;
@@ -93,29 +101,23 @@ export function createArcaneHarness(): AgentHarness {
       let streamingCapped = false;
 
       const openclawSessionId =
-        safeString((params as any).sessionId) ??
-        safeString((params as any).openclawSessionId) ??
-        "unknown-session";
+        safeString(p.sessionId) ?? safeString(p.openclawSessionId) ?? "unknown-session";
       const binding = bindings.get(openclawSessionId);
       const policy = loadPolicy({ scope: { openclawSessionId, nativeThreadId: binding?.nativeThreadId } });
       const attemptId = cryptoRandomId();
       const modeConfig = defaultModeConfig();
       let modeState: ModeState = initModeState();
-      const trigger = (params as any)?.trigger as { source?: unknown; id?: unknown } | undefined;
+      const trigger = p.trigger;
       const triggerId = typeof trigger?.id === "string" ? trigger.id : undefined;
       const triggerSource = typeof trigger?.source === "string" ? trigger.source : "unknown";
-      const intent = safeString((params as any)?.intent) ?? safeString((params as any)?.objective) ?? "interactive_attempt";
+      const intent = safeString(p.intent) ?? safeString(p.objective) ?? "interactive_attempt";
       const untrustedContext =
-        (params as any)?.untrustedContext && typeof (params as any)?.untrustedContext === "object"
-          ? ((params as any).untrustedContext as Record<string, unknown>)
+        p.untrustedContext && typeof p.untrustedContext === "object"
+          ? (p.untrustedContext as Record<string, unknown>)
           : undefined;
-      const expectedSideEffects = Array.isArray((params as any)?.expectedSideEffects)
-        ? ((params as any).expectedSideEffects as unknown[]).map(String)
-        : [];
+      const expectedSideEffects = Array.isArray(p.expectedSideEffects) ? p.expectedSideEffects.map(String) : [];
       const capabilityProfile =
-        (params as any)?.capabilityProfile && typeof (params as any)?.capabilityProfile === "object"
-          ? ((params as any).capabilityProfile as Record<string, unknown>)
-          : undefined;
+        p.capabilityProfile && typeof p.capabilityProfile === "object" ? (p.capabilityProfile as Record<string, unknown>) : undefined;
 
       const effectiveProfileForMode = (m: keyof typeof modeConfig.profiles): CapabilityProfile => {
         if (m !== "safe_mode" || policy.derived.safeModeAllowlistAdd.length === 0) return modeConfig.profiles[m];
@@ -139,7 +141,7 @@ export function createArcaneHarness(): AgentHarness {
             signal: { kind: "budget_exceeded", which: "turns_per_hour" },
           });
 
-          params.onAgentEvent?.({
+          p.onAgentEvent?.({
             kind: "budget_exceeded",
             which: "turns_per_hour",
             maxTurnsPerHour,
@@ -153,36 +155,36 @@ export function createArcaneHarness(): AgentHarness {
             openclawSessionId,
             attemptId,
             mode: modeState.mode,
-            trigger: { source: triggerSource as any, id: triggerId },
+            trigger: { source: triggerSource, id: triggerId },
             intent,
             expectedSideEffects,
             notes: { reason: "turns_per_hour_budget_exceeded", maxTurnsPerHour, countInWindow },
           });
 
-          return { text: "", native: { error: "turns_per_hour_budget_exceeded" } } as any;
+          return { text: "", native: { error: "turns_per_hour_budget_exceeded" } } as unknown as AgentHarnessAttemptResult;
         }
       }
 
       const payload: HarnessAttemptPayload = {
         v: 0,
         attemptId,
-        prompt: params.prompt,
+        prompt: p.prompt,
         intent,
         untrustedContext,
         expectedSideEffects,
-        capabilityProfile: capabilityProfile ?? (derivedCapabilityProfile as any),
-        trigger: { source: triggerSource as any, id: triggerId },
-        model: safeString((params as unknown as { model?: unknown }).model),
-        provider: safeString((params as unknown as { provider?: unknown }).provider),
-        tools: resolveToolListForPayload(params),
-        images: (params as { images?: HarnessAttemptPayload["images"] }).images ?? [],
+        capabilityProfile: capabilityProfile ?? (derivedCapabilityProfile as unknown as Record<string, unknown>),
+        trigger: { source: triggerSource as TriggerSource, id: triggerId },
+        model: safeString(p.model),
+        provider: safeString(p.provider),
+        tools: resolveToolListForPayload(p),
+        images: (p as { images?: HarnessAttemptPayload["images"] }).images ?? [],
         session: {
-          openclawSessionId: safeString((params as any).sessionId),
-          transcriptPath: safeString((params as any).transcriptPath),
+          openclawSessionId: safeString(p.sessionId),
+          transcriptPath: safeString(p.transcriptPath),
         },
         policy: {
-          sandbox: (params as any).sandbox,
-          toolPolicy: (params as any).toolPolicy,
+          sandbox: p.sandbox,
+          toolPolicy: p.toolPolicy,
         },
       };
 
@@ -194,7 +196,11 @@ export function createArcaneHarness(): AgentHarness {
           const elapsedMs = Date.now() - attemptStartTs;
           const profile = effectiveProfileForMode(modeState.mode);
           const toolTimeoutMs = Math.min(
-            Number((params as any)?.toolPolicy?.perToolTimeoutMs ?? profile.budgets.perToolTimeoutMs),
+            Number(
+              p.toolPolicy && typeof p.toolPolicy === "object" && "perToolTimeoutMs" in p.toolPolicy
+                ? (p.toolPolicy as { perToolTimeoutMs?: unknown }).perToolTimeoutMs
+                : profile.budgets.perToolTimeoutMs,
+            ),
             profile.budgets.perToolTimeoutMs,
           );
 
@@ -226,7 +232,7 @@ export function createArcaneHarness(): AgentHarness {
           }
 
           const exec = await executeToolViaOpenClawCore({
-            params,
+            params: p,
             toolCall: { callId: toolCall.callId, name: toolCall.name, arguments: toolCall.arguments },
             timeoutMs: toolTimeoutMs,
           });
@@ -245,7 +251,7 @@ export function createArcaneHarness(): AgentHarness {
             openclawSessionId,
             attemptId,
             mode: modeState.mode,
-            trigger: { source: triggerSource as any, id: triggerId },
+            trigger: { source: triggerSource, id: triggerId },
             intent,
             expectedSideEffects,
             tool: {
@@ -265,7 +271,7 @@ export function createArcaneHarness(): AgentHarness {
             notes: exec.ok ? { triggerId } : { triggerId, error: exec.error },
           });
 
-          params.onAgentEvent?.({
+          p.onAgentEvent?.({
             kind: "budget_remaining",
             remaining: {
               toolCallsThisTurn: Math.max(0, profile.budgets.maxToolCallsPerTurn - toolCallsThisTurn),
@@ -291,7 +297,7 @@ export function createArcaneHarness(): AgentHarness {
                     state: modeState,
                     signal: { kind: "anomalous_spend", reason: `partial_reply_exceeded:${maxChars}` },
                   });
-                  params.onAgentEvent?.({
+                  p.onAgentEvent?.({
                     kind: "protocol_violation",
                     scope: "partial_reply",
                     reason: "streaming_cap_exceeded",
@@ -301,21 +307,21 @@ export function createArcaneHarness(): AgentHarness {
                 } else {
                   streamedChars = nextChars;
                   streamed += evt.text;
-                  void params.onPartialReply?.({ text: evt.text });
+                  void p.onPartialReply?.({ text: evt.text });
                 }
               }
               break;
             case "agent_event":
-              params.onAgentEvent?.(evt.event as any);
+              p.onAgentEvent?.(evt.event as any);
               break;
             case "handshake":
-              params.onAgentEvent?.({ kind: "handshake", ...evt } as any);
+              p.onAgentEvent?.({ kind: "handshake", ...evt } as any);
               break;
             case "heartbeat":
-              params.onAgentEvent?.({ kind: "heartbeat", ts: evt.ts, status: evt.status } as any);
+              p.onAgentEvent?.({ kind: "heartbeat", ts: evt.ts, status: evt.status } as any);
               break;
             case "budget":
-              params.onAgentEvent?.({
+              p.onAgentEvent?.({
                 kind: "budget_remaining",
                 remaining: {
                   turnsPerHour: evt.remaining.turnsPerHour,
@@ -343,7 +349,7 @@ export function createArcaneHarness(): AgentHarness {
 
       // Attempt footer (searchable): no secrets, no raw tool args.
       const auditPath = audit.ledgerPathForDate();
-      params.onAgentEvent?.({
+      p.onAgentEvent?.({
         kind: "audit_footer",
         attemptId,
         mode: modeState.mode,
@@ -357,11 +363,12 @@ export function createArcaneHarness(): AgentHarness {
       return {
         text: finalText,
         native: result.native ?? {},
-      } as any;
+      } as unknown as AgentHarnessAttemptResult;
     },
 
-    async reset(ctx: any) {
-      const openclawSessionId = safeString(ctx?.sessionId) ?? safeString(ctx?.openclawSessionId);
+    async reset(ctx: AgentHarnessResetParams) {
+      const c = ctx as AgentHarnessResetParams & { openclawSessionId?: string };
+      const openclawSessionId = safeString(c.sessionId) ?? safeString(c.openclawSessionId) ?? safeString(c.sessionKey);
       if (!openclawSessionId) return;
       const binding = bindings.get(openclawSessionId);
       await daemon.resetSession({ openclawSessionId, binding });

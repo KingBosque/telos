@@ -6,7 +6,9 @@ export default definePluginEntry({
   name: "Arcane Native Agent Harness",
   description: "Runs prepared OpenClaw attempts through a native runtime (echo CLI starter).",
   register(api) {
-    api.registerAgentHarness(createArcaneHarness());
+    api.registerAgentHarness(
+      createArcaneHarness({ pluginConfig: api.pluginConfig }),
+    );
   },
 });
 
