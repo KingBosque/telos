@@ -36,6 +36,8 @@ type QuarantineEnvelope = {
 
 type Inbound = AttemptEnvelope | ResetEnvelope | ToolResult | QuarantineEnvelope;
 
+type PendingToolResult = { callId: string; resolve: (v: unknown) => void };
+
 function writeEvent(evt: unknown) {
   process.stdout.write(JSON.stringify(evt) + "\n");
 }
@@ -73,7 +75,7 @@ async function main() {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
   const sessions = new Map<string, SessionState>();
-  let pendingToolResult: { callId: string; resolve: (v: unknown) => void } | null = null;
+  let pendingToolResult: PendingToolResult | null = null;
 
   const audit = createAuditLedger();
   const modeConfig = defaultModeConfig();
@@ -309,11 +311,11 @@ async function main() {
     }
 
     if (msg.type === "tool_result") {
-      const tr: ToolResult = msg;
-      if (pendingToolResult && tr.callId === pendingToolResult.callId) {
-        const p = pendingToolResult;
+      const tr = msg as ToolResult;
+      const pending: PendingToolResult | null = pendingToolResult;
+      if (pending && tr.callId === pending.callId) {
         pendingToolResult = null;
-        p.resolve(tr.result);
+        pending.resolve(tr.result);
       }
       continue;
     }

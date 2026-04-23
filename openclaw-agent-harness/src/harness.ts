@@ -26,11 +26,14 @@ function resolveToolListForPayload(params: AgentHarnessAttemptParams): HarnessAt
   }
   const clientTools = p.clientTools;
   if (Array.isArray(clientTools) && clientTools.length > 0) {
-    return clientTools.map((t) => ({
-      name: String((t as { name: unknown }).name),
-      description: safeString((t as { description?: unknown }).description),
-      schema: (t as { schema?: unknown; parameters?: unknown }).schema ?? (t as { parameters?: unknown }).parameters,
-    }));
+    return clientTools.map((t) => {
+      const tool = t as unknown as Record<string, unknown>;
+      return {
+        name: typeof tool.name === "string" ? tool.name : "unknown_tool",
+        description: safeString(tool.description),
+        schema: tool.schema ?? tool.parameters,
+      };
+    });
   }
   return [];
 }
