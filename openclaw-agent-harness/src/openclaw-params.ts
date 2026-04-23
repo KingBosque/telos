@@ -1,15 +1,17 @@
 import type { AgentHarnessAttemptParams } from "openclaw/plugin-sdk/agent-harness";
 
 /**
- * OpenClaw's public `AgentHarnessAttemptParams` is a large embedded-run shape; this
- * harness also reads a few optional fields that are not stable across SDK revisions.
- * Keep all "loose" reads in one place instead of scattering `as any`.
+ * Optional fields this harness may read that are not on OpenClaw's
+ * `AgentHarnessAttemptParams` (or that we want as `unknown` without widening
+ * the whole tree).
+ *
+ * **Do not add `trigger` here** — the SDK already defines `trigger` as
+ * `EmbeddedRunTrigger` (string union). Intersecting a different `trigger` shape
+ * makes `trigger` become `never` and breaks honest typing.
  */
-export type ArcaneHarnessAttemptExtras = {
-  sessionId?: string;
+export type ArcaneHarnessLooseFields = {
   openclawSessionId?: string;
   transcriptPath?: string;
-  trigger?: { source?: unknown; id?: unknown };
   intent?: unknown;
   objective?: unknown;
   untrustedContext?: unknown;
@@ -17,12 +19,10 @@ export type ArcaneHarnessAttemptExtras = {
   capabilityProfile?: unknown;
   sandbox?: unknown;
   toolPolicy?: unknown;
-  model?: unknown;
-  provider?: unknown;
 };
 
-export type ArcaneHarnessAttemptParams = AgentHarnessAttemptParams & ArcaneHarnessAttemptExtras;
+export type ArcaneAttemptParams = AgentHarnessAttemptParams & ArcaneHarnessLooseFields;
 
-export function asArcaneAttemptParams(params: AgentHarnessAttemptParams): ArcaneHarnessAttemptParams {
-  return params as ArcaneHarnessAttemptParams;
+export function asArcaneAttemptParams(params: AgentHarnessAttemptParams): ArcaneAttemptParams {
+  return params as ArcaneAttemptParams;
 }

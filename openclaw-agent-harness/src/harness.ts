@@ -4,8 +4,10 @@ import type {
   AgentHarnessAttemptResult,
   AgentHarnessResetParams,
 } from "openclaw/plugin-sdk/agent-harness";
-import type { HarnessAttemptPayload, TriggerSource } from "./serde/attemptPayload.js";
-import { asArcaneAttemptParams, type ArcaneHarnessAttemptParams } from "./openclaw-params.js";
+import type { HarnessAttemptPayload } from "./serde/attemptPayload.js";
+import { asArcaneAttemptParams, type ArcaneAttemptParams } from "./openclaw-params.js";
+import { attemptTriggerForPayload } from "./openclaw-triggerMap.js";
+import { asNarrowHarnessAttemptResult, emitHarnessAgentEvent } from "./openclaw-harnessShim.js";
 import { createSpawnedDaemonClient } from "./daemon/client.js";
 import { InMemoryBindingStore } from "./daemon/inMemoryBindings.js";
 import { FileBindingStore } from "./daemon/fileBindingStore.js";
@@ -19,8 +21,8 @@ import { createTurnsPerHourLimiter } from "./safety/turnBudget.js";
 export const ARCANE_HARNESS_ID = "arcane-native";
 
 /** OpenClaw uses `clientTools` on the attempt params; this starter also accepts legacy `tools` for the daemon payload. */
-function resolveToolListForPayload(params: AgentHarnessAttemptParams | ArcaneHarnessAttemptParams): HarnessAttemptPayload["tools"] {
-  const p = params as ArcaneHarnessAttemptParams & {
+function resolveToolListForPayload(params: AgentHarnessAttemptParams): HarnessAttemptPayload["tools"] {
+  const p = params as ArcaneAttemptParams & {
     tools?: HarnessAttemptPayload["tools"];
   };
   if (Array.isArray(p.tools) && p.tools.length > 0) {
@@ -100,16 +102,13 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
       let streamedChars = 0;
       let streamingCapped = false;
 
-      const openclawSessionId =
-        safeString(p.sessionId) ?? safeString(p.openclawSessionId) ?? "unknown-session";
+      const openclawSessionId = p.sessionId || safeString(p.openclawSessionId) || "unknown-session";
       const binding = bindings.get(openclawSessionId);
       const policy = loadPolicy({ scope: { openclawSessionId, nativeThreadId: binding?.nativeThreadId } });
       const attemptId = cryptoRandomId();
+      const { source: triggerSource, id: triggerId } = attemptTriggerForPayload(p, { attemptId });
       const modeConfig = defaultModeConfig();
       let modeState: ModeState = initModeState();
-      const trigger = p.trigger;
-      const triggerId = typeof trigger?.id === "string" ? trigger.id : undefined;
-      const triggerSource = typeof trigger?.source === "string" ? trigger.source : "unknown";
       const intent = safeString(p.intent) ?? safeString(p.objective) ?? "interactive_attempt";
       const untrustedContext =
         p.untrustedContext && typeof p.untrustedContext === "object"
@@ -141,7 +140,7 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
             signal: { kind: "budget_exceeded", which: "turns_per_hour" },
           });
 
-          p.onAgentEvent?.({
+          emitHarnessAgentEvent(p, {
             kind: "budget_exceeded",
             which: "turns_per_hour",
             maxTurnsPerHour,
@@ -149,7 +148,7 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
             remaining: Math.max(0, maxTurnsPerHour - countInWindow),
             openclawSessionId,
             trigger: { source: triggerSource, id: triggerId },
-          } as any);
+          });
 
           audit.append({
             openclawSessionId,
@@ -161,7 +160,7 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
             notes: { reason: "turns_per_hour_budget_exceeded", maxTurnsPerHour, countInWindow },
           });
 
-          return { text: "", native: { error: "turns_per_hour_budget_exceeded" } } as unknown as AgentHarnessAttemptResult;
+          return asNarrowHarnessAttemptResult({ text: "", native: { error: "turns_per_hour_budget_exceeded" } });
         }
       }
 
@@ -173,11 +172,11 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
         untrustedContext,
         expectedSideEffects,
         capabilityProfile: capabilityProfile ?? (derivedCapabilityProfile as unknown as Record<string, unknown>),
-        trigger: { source: triggerSource as TriggerSource, id: triggerId },
-        model: safeString(p.model),
-        provider: safeString(p.provider),
+        trigger: { source: triggerSource, id: triggerId },
+        model: p.modelId,
+        provider: p.provider,
         tools: resolveToolListForPayload(p),
-        images: (p as { images?: HarnessAttemptPayload["images"] }).images ?? [],
+        images: (p.images ?? []) as HarnessAttemptPayload["images"],
         session: {
           openclawSessionId: safeString(p.sessionId),
           transcriptPath: safeString(p.transcriptPath),
@@ -271,14 +270,14 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
             notes: exec.ok ? { triggerId } : { triggerId, error: exec.error },
           });
 
-          p.onAgentEvent?.({
+          emitHarnessAgentEvent(p, {
             kind: "budget_remaining",
             remaining: {
               toolCallsThisTurn: Math.max(0, profile.budgets.maxToolCallsPerTurn - toolCallsThisTurn),
               wallClockMsThisTurn: Math.max(0, profile.budgets.maxWallClockMsPerTurn - elapsedMs),
             },
             mode: modeState.mode,
-          } as any);
+          });
 
           return exec.ok
             ? { result: exec.result, approved: exec.approved ?? undefined, policyBasis }
@@ -297,13 +296,13 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
                     state: modeState,
                     signal: { kind: "anomalous_spend", reason: `partial_reply_exceeded:${maxChars}` },
                   });
-                  p.onAgentEvent?.({
+                  emitHarnessAgentEvent(p, {
                     kind: "protocol_violation",
                     scope: "partial_reply",
                     reason: "streaming_cap_exceeded",
                     maxChars,
                     observedChars: nextChars,
-                  } as any);
+                  });
                 } else {
                   streamedChars = nextChars;
                   streamed += evt.text;
@@ -312,16 +311,16 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
               }
               break;
             case "agent_event":
-              p.onAgentEvent?.(evt.event as any);
+              emitHarnessAgentEvent(p, evt.event);
               break;
             case "handshake":
-              p.onAgentEvent?.({ kind: "handshake", ...evt } as any);
+              emitHarnessAgentEvent(p, { kind: "handshake", ...evt });
               break;
             case "heartbeat":
-              p.onAgentEvent?.({ kind: "heartbeat", ts: evt.ts, status: evt.status } as any);
+              emitHarnessAgentEvent(p, { kind: "heartbeat", ts: evt.ts, status: evt.status });
               break;
             case "budget":
-              p.onAgentEvent?.({
+              emitHarnessAgentEvent(p, {
                 kind: "budget_remaining",
                 remaining: {
                   turnsPerHour: evt.remaining.turnsPerHour,
@@ -329,7 +328,7 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
                   wallClockMsThisTurn: evt.remaining.wallClockMsThisTurn,
                 },
                 mode: modeState.mode,
-              } as any);
+              });
               break;
             case "tool_call":
             case "tool_result":
@@ -349,7 +348,7 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
 
       // Attempt footer (searchable): no secrets, no raw tool args.
       const auditPath = audit.ledgerPathForDate();
-      p.onAgentEvent?.({
+      emitHarnessAgentEvent(p, {
         kind: "audit_footer",
         attemptId,
         mode: modeState.mode,
@@ -358,12 +357,12 @@ export function createArcaneHarness(_options?: { pluginConfig?: unknown }): Agen
         expectedSideEffects,
         toolsUsed: ["(see audit ledger)"],
         auditLedgerPath: auditPath,
-      } as any);
+      });
 
-      return {
+      return asNarrowHarnessAttemptResult({
         text: finalText,
         native: result.native ?? {},
-      } as unknown as AgentHarnessAttemptResult;
+      });
     },
 
     async reset(ctx: AgentHarnessResetParams) {
